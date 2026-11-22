@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Sirena di Seebeck (R. Koenig) - Piste da Foto Originale</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background: #18181b; color: #f4f4f5; max-width: 820px; margin: 24px auto; padding: 20px; }
+  h1 { color: #eab308; font-size: 1.45rem; margin: 0 0 4px 0; }
+  .sub { color: #a1a1aa; font-size: 0.9rem; margin: 0 0 18px 0; }
+  .grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 20px; align-items: start; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: #27272a; padding: 18px; border-radius: 10px; border: 1px solid #3f3f46; }
+  .track-list { display: flex; flex-direction: column; gap: 8px; }
+  button.track { width: 100%; padding: 10px 12px; font-size: 0.92rem; border: 1px solid #52525b; border-radius: 6px; cursor: pointer; text-align: left; background: #323238; color: #f4f4f5; transition: 0.15s; }
+  button.track:hover { background: #3f3f46; }
+  button.track.active { background: #eab308; color: #18181b; border-color: #eab308; font-weight: 700; }
+  button.stop { width: 100%; padding: 11px; font-size: 0.95rem; font-weight: 700; border: none; border-radius: 6px; cursor: pointer; background: #b91c1c; color: #fff; margin-top: 14px; }
+  button.stop:hover { background: #dc2626; }
+  .control { margin-top: 14px; }
+  .control label { display: flex; justify-content: space-between; font-size: 0.88rem; color: #d4d4d8; margin-bottom: 4px; }
+  input[type=range] { width: 100%; accent-color: #eab308; }
+  .info-box { margin-top: 14px; padding: 10px 12px; background: #1c1c1f; border-left: 3px solid #eab308; border-radius: 4px; font-size: 0.85rem; color: #d4d4d8; line-height: 1.4; }
+  canvas { display: block; margin: 0 auto; background: #141417; border-radius: 50%; border: 2px solid #3f3f46; }
+</style>
+</head>
+<body>
+
+<h1>Sirena di Seebeck — R. Koenig (Calibrazione su Foto)</h1>
+<p class="sub">Piste concentriche e a gruppi calibrate sull'osservazione visiva del disco in ottone</p>
+
+<div class="grid">
+  <div class="panel">
+    <div class="track-list">
+      <button class="track" id="t-inner" onclick="selezionaPista('inner')">
+        Pista 1 (Interna) — 18 fori regolari (Tono grave fondamentale)
+      </button>
+      <button class="track" id="t-mid1" onclick="selezionaPista('mid1')">
+        Pista 2 (Medio-interna) — 24 fori regolari (La3 ~ 440 Hz a 1.0x)
+      </button>
+      <button class="track" id="t-mid2" onclick="selezionaPista('mid2')">
+        Pista 3 (Medio-esterna) — 36 fori regolari (Quinta / intervallo superiore)
+      </button>
+      <button class="track" id="t-outer-groups" onclick="selezionaPista('outer-groups')">
+        Pista 4 (Fascia esterna) — Gruppi ravvicinati di fori (Battimenti / modulazione)
+      </button>
+      <button class="track" id="t-irregular" onclick="selezionaPista('irregular')">
+        Pista 5 (Spaziatura mista/casuale) — Intervalli non uniformi (Rumore / crepitio)
+      </button>
+    </div>
+
+    <div class="control">
+      <label><span>Posizione radiale ugello (centro &rarr; bordo)</span><span id="raggio-val">62%</span></label>
+      <input type="range" id="raggio" min="25" max="90" step="1" value="62" oninput="aggiornaRaggio()">
+    </div>
+
+    <div class="control">
+      <label><span>Velocità di rotazione del disco</span><span id="vel-val">1.00x</span></label>
+      <input type="range" id="vel" min="0.35" max="2.00" step="0.05" value="1.00" oninput="aggiornaVelocita()">
+    </div>
+
+    <div class="info-box" id="descrizione-pista">
+      Seleziona una pista per avviare il getto d'aria e confrontare l'andamento dei fori sul disco.
+    </div>
+
+    <button class="stop" onclick="ferma()">CHIUDI GETTO D'ARIA</button>
+  </div>
+
+  <div class="panel" style="text-align: center;">
+    <canvas id="disco" width="320" height="320"></canvas>
+    <p class="sub" style="margin-top: 10px; margin-bottom: 0; font-size: 0.8rem;">
+      Indicatore rosso: ugello dell'aria · Cerchio tratteggiato: raggio attivo
+    </p>
+  </div>
+</div>
+
+<script>
+// Configurazione delle 5 piste calibrate sulle fasce visibili del disco di Koenig
+const PISTE = {
+  'inner': {
+    raggioNorm: 0.30,
+    desc: 'Anello interno regolare (18 fori): impulsi d\'aria lenti e periodici, tono più grave.',
+    fori: Array.from({ length: 18 }, (_, i) => i / 18)
+  },
+  'mid1': {
+    raggioNorm: 0.46,
+    desc: 'Anello medio-interno regolare (24 fori): frequenza pulita e costante a velocità nominale.',
+    fori: Array.from({ length: 24 }, (_, i) => i / 24)
+  },
+  'mid2': {
+    raggioNorm: 0.62,
+    desc: 'Anello medio-esterno regolare (36 fori): frequenza più alta di 1,5x rispetto ai 24 fori (intervallo di quinta).',
+    fori: Array.from({ length: 36 }, (_, i) => i / 36)
+  },
+  'outer-groups': {
+    raggioNorm: 0.80,
+    desc: 'Fascia esterna a pacchetti (6 gruppi da 5 fori): ispirata alle fasce esterne del disco di Koenig; produce battimenti e modulazione ritmica.',
+    fori: (() => {
+      const arr = [];
+      const gruppi = 6;
+      const perGruppo = 5;
+      for (let g = 0; g < gruppi; g++) {
+        const start = g / gruppi;
+        for (let k = 0; k < perGruppo; k++) {
+          arr.push(start + k * 0.016);
+        }
+      }
+      return arr.sort((a, b) => a - b);
+    })()
+  },
+  'irregular': {
+    raggioNorm: 0.88,
+    desc: 'Disposizione non uniforme (30 fori a distanza irregolare): senza periodicità costante si perde una nota definita e emerge rumore/fruscio.',
+    fori: (() => {
+      // Generatore deterministico pseudo-casuale così la pista è riproducibile
+      let seed = 1839;
+      const rand = () => {
+        seed = (seed * 16807) % 2147483647;
+        return (seed - 1) / 2147483646;
+      };
+      return Array.from({ length: 30 }, () => rand()).sort((a, b) => a - b);
+    })()
+  }
+};
+
+let audioCtx = null;
+let sourceNode = null;
+let gainNode = null;
+let pistaAttiva = null;
+let angolo = 0;
+let animId = null;
+
+function creaBuffer(chiavePista) {
+  const sr = audioCtx.sampleRate;
+  const buf = audioCtx.createBuffer(1, sr, sr);
+  const data = buf.getChannelData(0);
+  const fori = PISTE[chiavePista].fori;
+
+  // 18.333 giri/sec * 24 fori = 440 Hz sulla pista da 24 fori
+  const giriSec = 18.333;
+  const campioniGiro = sr / giriSec;
+  const larghezza = 0.0075;
+
+  for (let i = 0; i < sr; i++) {
+    const fase = (i % campioniGiro) / campioniGiro;
+    let impulso = 0;
+
+    for (let f = 0; f < fori.length; f++) {
+      let d = Math.abs(fase - fori[f]);
+      if (d > 0.5) d = 1.0 - d;
+      if (d < larghezza) {
+        impulso = 0.5 * (1 + Math.cos((d / larghezza) * Math.PI));
+        break;
+      }
+    }
+
+    const soffio = (Math.random() * 2 - 1) * 0.025;
+    data[i] = impulso * 0.65 + soffio;
+  }
+  return buf;
+}
+
+function selezionaPista(chiave) {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  ferma(false);
+  pistaAttiva = chiave;
+
+  // Allinea lo slider del raggio alla pista scelta
+  const rPct = Math.round(PISTE[chiave].raggioNorm * 100);
+  document.getElementById('raggio').value = rPct;
+  document.getElementById('raggio-val').textContent = rPct + '%';
+
+  document.querySelectorAll('button.track').forEach(b => b.classList.remove('active'));
+  document.getElementById('t-' + chiave).classList.add('active');
+  document.getElementById('descrizione-pista').textContent = PISTE[chiave].desc;
+
+  sourceNode = audioCtx.createBufferSource();
+  sourceNode.buffer = creaBuffer(chiave);
+  sourceNode.loop = true;
+
+  gainNode = audioCtx.createGain();
+  gainNode.gain.value = 0.38;
+
+  sourceNode.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+
+  aggiornaVelocita();
+  sourceNode.start();
+  disegna();
+}
+
+function aggiornaRaggio() {
+  const val = parseInt(document.getElementById('raggio').value, 10);
+  document.getElementById('raggio-val').textContent = val + '%';
+  if (!pistaAttiva) disegna();
+}
+
+function aggiornaVelocita() {
+  const val = parseFloat(document.getElementById('vel').value);
+  document.getElementById('vel-val').textContent = val.toFixed(2) + 'x';
+  if (sourceNode) sourceNode.playbackRate.value = val;
+}
+
+function ferma(resetUI = true) {
+  if (sourceNode) {
+    try { sourceNode.stop(); } catch (e) {}
+    sourceNode.disconnect();
+    sourceNode = null;
+  }
+  if (resetUI) {
+    pistaAttiva = null;
+    document.querySelectorAll('button.track').forEach(b => b.classList.remove('active'));
+    document.getElementById('descrizione-pista').textContent =
+      'Getto d\'aria chiuso. Seleziona una pista per riprendere l\'ascolto.';
+    cancelAnimationFrame(animId);
+    disegna();
+  }
+}
+
+function disegna() {
+  const canvas = document.getElementById('disco');
+  const ctx = canvas.getContext('2d');
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const rMax = 142;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Disco in ottone
+  ctx.beginPath();
+  ctx.arc(cx, cy, rMax, 0, Math.PI * 2);
+  ctx.fillStyle = '#b59338';
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#6b5317';
+  ctx.stroke();
+
+  // Disegna tutte le piste calibrate
+  Object.entries(PISTE).forEach(([chiave, pista]) => {
+    const rPista = rMax * pista.raggioNorm;
+    const isAttiva = chiave === pistaAttiva;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, rPista, 0, Math.PI * 2);
+    ctx.strokeStyle = isAttiva ? 'rgba(255, 255, 255, 0.55)' : 'rgba(60, 45, 10, 0.25)';
+    ctx.lineWidth = isAttiva ? 1.5 : 1;
+    ctx.stroke();
+
+    pista.fori.forEach(pos => {
+      const a = angolo + pos * Math.PI * 2;
+      const fx = cx + Math.cos(a) * rPista;
+      const fy = cy + Math.sin(a) * rPista;
+      ctx.beginPath();
+      ctx.arc(fx, fy, isAttiva ? 3.2 : 2.3, 0, Math.PI * 2);
+      ctx.fillStyle = isAttiva ? '#111113' : '#27272a';
+      ctx.fill();
+    });
+  });
+
+  // Cerchio del raggio ugello selezionato
+  const rUgelloNorm = parseInt(document.getElementById('raggio').value, 10) / 100;
+  const rUgello = rMax * rUgelloNorm;
+  ctx.save();
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.arc(cx, cy, rUgello, 0, Math.PI * 2);
+  ctx.strokeStyle = '#ef4444';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  // Perno centrale
+  ctx.beginPath();
+  ctx.arc(cx, cy, 11, 0, Math.PI * 2);
+  ctx.fillStyle = '#18181b';
+  ctx.fill();
+
+  // Ugello in alto sulla verticale del raggio attivo
+  ctx.fillStyle = '#ef4444';
+  ctx.fillRect(cx - 3.5, cy - rUgello - 10, 7, 14);
+
+  if (pistaAttiva) {
+    const vel = parseFloat(document.getElementById('vel').value);
+    angolo += 0.06 * vel;
+    animId = requestAnimationFrame(disegna);
+  }
+}
+
+disegna();
+</script>
+</body>
+</html>
